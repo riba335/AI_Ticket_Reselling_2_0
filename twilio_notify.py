@@ -1,0 +1,1 @@
+# WhatsApp upozornenia placeholder
