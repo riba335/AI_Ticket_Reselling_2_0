@@ -1,45 +1,35 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import random
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+import pandas as pd
+import json
 
 app = FastAPI()
+templates = Jinja2Templates(directory="templates")
 
-class EventInput(BaseModel):
-    name: str
-    date: str
-    location: str
-    price: float
-    artist_popularity: int  # 0–100
-    is_weekend: bool
-    past_sales_success: float  # 0.0 – 1.0
-    ticket_demand_score: int  # 0–100
+CSV_PATH = "event_data.csv"
 
-class EventPrediction(BaseModel):
-    attracti_score: float
-    expected_profit: float
-    should_buy: bool
-    reason: str
+@app.get("/", response_class=HTMLResponse)
+async def read_dashboard(request: Request):
+    try:
+        df = pd.read_csv(CSV_PATH)
+    except Exception:
+        df = pd.DataFrame(columns=["Názov", "Dátum", "Cena (€)", "Zisk (€)", "AttractiScore", "Odporúčanie"])
+    return templates.TemplateResponse("dashboard.html", {"request": request, "data": df.to_dict(orient="records")})
 
-@app.post("/predict", response_model=EventPrediction)
-def predict_event(event: EventInput):
-    attracti_score = (
-        0.3 * event.artist_popularity +
-        0.2 * (100 if event.is_weekend else 50) +
-        0.3 * event.ticket_demand_score +
-        0.2 * (event.past_sales_success * 100)
-    )
+@app.post("/predict")
+async def predict_event(request: Request):
+    data = await request.json()
+    cena = float(data.get("cena", 0))
+    attract = int(data.get("attract_score", 0))
 
-    expected_selling_price = event.price * (1.2 + random.uniform(-0.1, 0.2))
-    platform_fees = 0.1 * expected_selling_price
-    expected_profit = round(expected_selling_price - event.price - platform_fees, 2)
+    odporucanie = "KÚPIŤ" if attract >= 75 and cena <= 100 else "NEKÚPIŤ"
+    zisk = round(50 + attract - cena, 2)
 
-    should_buy = attracti_score >= 70 and expected_profit > 5
-    reason = "Vysoký dopyt a očakávaný zisk." if should_buy else "Nízka atraktivita alebo malý zisk."
-
-    return EventPrediction(
-        attracti_score=round(attracti_score, 2),
-        expected_profit=expected_profit,
-        should_buy=should_buy,
-        reason=reason
-    )
-
+    return {
+        "expected_profit": zisk,
+        "is_profitable": odporucanie == "KÚPIŤ",
+        "attract_score": attract,
+        "recommendation": odporucanie
+    }
